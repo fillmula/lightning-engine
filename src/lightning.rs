@@ -5,7 +5,7 @@ use hyper::service::{make_service_fn, service_fn};
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct Req {
-    request: Request<Vec<u8>>,
+    request: Request<Body>,
     host: String,
     path: String,
     args: Vec<String>,
@@ -143,7 +143,7 @@ impl App {
         });
     }
 
-    fn build_middleware(&'static self) -> Arc<Middleware> {
+    fn build_middleware(&self) -> Arc<Middleware> {
         let length = self.middlewares.len();
         if length == 0 { return Arc::new(|ctx| ctx) }
         if length == 1 {
@@ -159,12 +159,12 @@ impl App {
     }
 
     pub async fn listen(&self, port: u16) {
-        //let middleware = self.build_middleware();
+        let middleware = self.build_middleware().clone();
         println!("Start");
         let service = make_service_fn(move |_| {
             async {
                 Ok::<_, GenericError>(service_fn(move |req| {
-                    async { response_examples(req) }
+                    async { handle_response(req, self.build_middleware()) }
                 }))
             }
         });
@@ -178,6 +178,25 @@ impl App {
     }
 }
 
-fn response_examples(req: Request<Body>) -> Result<Response<Body>, GenericError> {
-    Ok(Response::new(Body::from("Hello from my code!")))
+fn handle_response(request: Request<Body>, middleware: Arc<Middleware>) -> Result<Response<Body>, GenericError> {
+    let mut ctx = Ctx {
+        req: Req {
+            request,
+            args: Vec::new(),
+            host: "".to_string(),
+            path: "".to_string(),
+            query: "".to_string(),
+            hash: "".to_string(),
+        },
+        res: Res {
+            code: None,
+            headers: HashMap::new(),
+            body: "".to_string()
+        },
+        state: State {
+            values: HashMap::new()
+        }
+    };
+    let ctx = middleware(ctx);
+    Ok(Response::new(Body::from(ctx.res.body)))
 }
