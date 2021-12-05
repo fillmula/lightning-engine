@@ -135,47 +135,56 @@ unsafe impl Send for Ctx {}
 
 pub type Next = dyn Fn() -> ();
 
-pub type Middleware = dyn Fn(Ctx) -> Ctx + Send + Sync;
+pub type Middleware = dyn Fn(&mut Ctx) + Send + Sync;
 
 static mut MIDDLEWARES: Vec<Arc<Middleware>> = Vec::new();
-const GETS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
-const POSTS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
-const PATCHES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
-const DELETES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+static mut GETS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+static mut POSTS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+static mut PATCHES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+static mut DELETES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
 
-pub fn get<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-    GETS.push((path, Arc::new(middleware)));
+pub fn get<F>(path: &'static str, middleware: F) where F: 'static + Fn(&mut Ctx) + Send + Sync {
+    unsafe {
+        GETS.push((path, Arc::new(middleware)));
+    }
 }
 
-pub fn post<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-    POSTS.push((path, Arc::new(middleware)));
+pub fn post<F>(path: &'static str, middleware: F) where F: 'static + Fn(&mut Ctx) + Send + Sync {
+    unsafe {
+        POSTS.push((path, Arc::new(middleware)));
+    }
 }
 
-pub fn patch<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-    PATCHES.push((path, Arc::new(middleware)));
+pub fn patch<F>(path: &'static str, middleware: F) where F: 'static + Fn(&mut Ctx) + Send + Sync {
+    unsafe {
+        PATCHES.push((path, Arc::new(middleware)));
+    }
 }
 
-pub fn delete<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-    DELETES.push((path, Arc::new(middleware)));
+pub fn delete<F>(path: &'static str, middleware: F) where F: 'static + Fn(&mut Ctx) + Send + Sync {
+    unsafe {
+        DELETES.push((path, Arc::new(middleware)));
+    }
 }
 
-pub fn install<F>(middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+pub fn install<F>(middleware: F) where F: 'static + Fn(&mut Ctx) + Send + Sync {
     unsafe {
         MIDDLEWARES.push(Arc::new(middleware));
     }
 }
 
 fn apply(outer: Arc<Middleware>, inner: Arc<Middleware>) -> Arc<Middleware> {
-    return Arc::new(move |mut ctx| {
-        ctx = outer(ctx);
-        return inner(ctx);
+    return Arc::new(move |ctx| {
+        outer(ctx);
+        inner(ctx);
     });
 }
 
 fn build_middleware() -> Arc<Middleware> {
+    println!("rebuilt middlewares");
     unsafe {
         let length = MIDDLEWARES.len();
-        if length == 0 { return Arc::new(|ctx| ctx) }
+        if length == 0 { return Arc::new(|_| ()) }
         if length == 1 {
             return MIDDLEWARES[0].clone();
          }
@@ -210,6 +219,6 @@ pub async fn listen(port: u16) {
 
 fn handle_response(request: Request<Body>, middleware: Arc<Middleware>) -> Result<Response<Body>, GenericError> {
     let mut ctx = Ctx::new(request);
-    ctx = middleware(ctx);
+    middleware(&mut ctx);
     Ok(Response::new(Body::from(ctx.res.body)))
 }
