@@ -175,7 +175,6 @@ fn apply(outer: Arc<Middleware>, inner: Arc<Middleware>) -> Arc<Middleware> {
 fn build_middleware() -> Arc<Middleware> {
     unsafe {
         let length = MIDDLEWARES.len();
-        println!("{}", length);
         if length == 0 { return Arc::new(|ctx| ctx) }
         if length == 1 {
             return MIDDLEWARES[0].clone();
@@ -192,11 +191,10 @@ fn build_middleware() -> Arc<Middleware> {
 
 pub async fn listen(port: u16) {
     //let middleware = build_middleware().clone();
-    println!("Start");
+    println!("Listening on port {}...", port);
     let service = make_service_fn(move |_| {
         async {
             Ok::<_, GenericError>(service_fn(move |req| {
-                println!("HERE RUN");
                 async { handle_response(req, build_middleware()) }
             }))
         }
