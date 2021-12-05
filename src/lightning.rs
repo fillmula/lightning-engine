@@ -53,6 +53,10 @@ impl Res {
     pub fn get_code(&self) -> Option<u8> {
         return self.code;
     }
+
+    pub fn set_body(&mut self, content: String) {
+        self.body = content;
+    }
 }
 
 unsafe impl Sync for Res {}
@@ -96,89 +100,81 @@ pub type Next = dyn Fn() -> ();
 
 pub type Middleware = dyn Fn(Ctx) -> Ctx + Send + Sync;
 
-pub struct App {
-    middlewares: Vec<Arc<Middleware>>,
-    gets: Vec<(&'static str, Box<Middleware>)>,
-    posts: Vec<(&'static str, Box<Middleware>)>,
-    patches: Vec<(&'static str, Box<Middleware>)>,
-    deletes: Vec<(&'static str, Box<Middleware>)>,
+static mut MIDDLEWARES: Vec<Arc<Middleware>> = Vec::new();
+const GETS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+const POSTS: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+const PATCHES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+const DELETES: Vec<(&'static str, Arc<Middleware>)> = Vec::new();
+
+pub fn get<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+    GETS.push((path, Arc::new(middleware)));
 }
 
-impl App {
+pub fn post<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+    POSTS.push((path, Arc::new(middleware)));
+}
 
-    pub fn new() -> App {
-        return App {
-            middlewares: Vec::new(),
-            gets: Vec::new(),
-            posts: Vec::new(),
-            patches: Vec::new(),
-            deletes: Vec::new(),
-        };
+pub fn patch<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+    PATCHES.push((path, Arc::new(middleware)));
+}
+
+pub fn delete<F>(path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+    DELETES.push((path, Arc::new(middleware)));
+}
+
+pub fn install<F>(middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
+    unsafe {
+        MIDDLEWARES.push(Arc::new(middleware));
     }
+}
 
-    pub fn get<F>(&mut self, path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-        self.gets.push((path, Box::new(middleware)));
-    }
+fn apply(outer: Arc<Middleware>, inner: Arc<Middleware>) -> Arc<Middleware> {
+    return Arc::new(move |mut ctx| {
+        ctx = outer(ctx);
+        return inner(ctx);
+    });
+}
 
-    pub fn post<F>(&mut self, path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-        self.posts.push((path, Box::new(middleware)));
-    }
-
-    pub fn patch<F>(&mut self, path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-        self.patches.push((path, Box::new(middleware)));
-    }
-
-    pub fn delete<F>(&mut self, path: &'static str, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-        self.deletes.push((path, Box::new(middleware)));
-    }
-
-    pub fn install<F>(&mut self, middleware: F) where F: 'static + Fn(Ctx) -> Ctx + Send + Sync {
-        self.middlewares.push(Arc::new(middleware))
-    }
-
-    fn apply(&self, outer: Arc<Middleware>, inner: Arc<Middleware>) -> Arc<Middleware> {
-        return Arc::new(move |mut ctx| {
-            ctx = outer(ctx);
-            return inner(ctx);
-        });
-    }
-
-    fn build_middleware(&self) -> Arc<Middleware> {
-        let length = self.middlewares.len();
+fn build_middleware() -> Arc<Middleware> {
+    unsafe {
+        let length = MIDDLEWARES.len();
+        println!("{}", length);
         if length == 0 { return Arc::new(|ctx| ctx) }
         if length == 1 {
-            return self.middlewares[0].clone();
+            return MIDDLEWARES[0].clone();
          }
         let range = (0..(length - 1)).rev();
-        let mut inner = self.middlewares[length - 1].clone();
+        let mut inner = MIDDLEWARES[length - 1].clone();
         for i in range {
-            let outer = self.middlewares[i].clone();
-            inner = self.apply(outer, inner);
+            let outer = MIDDLEWARES[i].clone();
+            inner = apply(outer, inner);
         }
         return inner;
     }
+}
 
-    pub async fn listen(&self, port: u16) {
-        let middleware = self.build_middleware().clone();
-        println!("Start");
-        let service = make_service_fn(move |_| {
-            async {
-                Ok::<_, GenericError>(service_fn(move |req| {
-                    async { handle_response(req, self.build_middleware()) }
-                }))
-            }
-        });
-
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let server = Server::bind(&addr).serve(service);
-        // Run this server for... forever!
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+pub async fn listen(port: u16) {
+    //let middleware = build_middleware().clone();
+    println!("Start");
+    let service = make_service_fn(move |_| {
+        async {
+            Ok::<_, GenericError>(service_fn(move |req| {
+                println!("HERE RUN");
+                async { handle_response(req, build_middleware()) }
+            }))
         }
+    });
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let server = Server::bind(&addr).serve(service);
+    // Run this server for... forever!
+    if let Err(e) = server.await {
+        eprintln!("server error: {}", e);
     }
 }
 
 fn handle_response(request: Request<Body>, middleware: Arc<Middleware>) -> Result<Response<Body>, GenericError> {
+    println!("HERE INTO");
     let mut ctx = Ctx {
         req: Req {
             request,
@@ -197,6 +193,6 @@ fn handle_response(request: Request<Body>, middleware: Arc<Middleware>) -> Resul
             values: HashMap::new()
         }
     };
-    let ctx = middleware(ctx);
+    ctx = middleware(ctx);
     Ok(Response::new(Body::from(ctx.res.body)))
 }

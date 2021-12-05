@@ -3,22 +3,21 @@
 #[tokio::main]
 async fn main() {
 
-    let mut app = lightning::App::new();
-
-    app.install(|ctx| {
+    lightning::install(|mut ctx| {
         println!("this middleware 1");
+        ctx.res().set_body("abc".to_string());
         return ctx;
     });
 
-    app.install(|ctx| {
+    lightning::install(|ctx| {
         println!("this middleware 2");
         return ctx;
     });
 
-    app.get("/abc", |mut ctx| {
+    lightning::get("/abc", |mut ctx| {
         ctx.res().set_code(200);
         return ctx;
     });
 
-    app.listen(5001).await;
+    lightning::listen(5001).await;
 }
