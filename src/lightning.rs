@@ -14,6 +14,18 @@ pub struct Req {
 }
 
 impl Req {
+
+    fn new(request: Request<Body>) -> Req {
+        return Req {
+            request,
+            args: Vec::new(),
+            host: "".to_string(),
+            path: "".to_string(),
+            query: "".to_string(),
+            hash: "".to_string(),
+        }
+    }
+
     pub fn get_host(&self) -> &String {
         return &self.host;
     }
@@ -46,6 +58,14 @@ pub struct Res {
 }
 
 impl Res {
+
+    fn new() -> Res {
+        Res {
+            code: None,
+            headers: HashMap::new(),
+            body: "".to_string()
+        }
+    }
     pub fn set_code(&mut self, code: u8) {
         return self.code = Some(code);
     }
@@ -68,6 +88,14 @@ pub struct State {
     values: HashMap<String, Box<dyn Any>>
 }
 
+impl State {
+    fn new() -> State {
+        State {
+            values: HashMap::new(),
+        }
+    }
+}
+
 unsafe impl Sync for State {}
 
 unsafe impl Send for State {}
@@ -79,6 +107,15 @@ pub struct Ctx {
 }
 
 impl Ctx {
+
+    fn new(request: Request<Body>) -> Ctx {
+        Ctx {
+            req: Req::new(request),
+            res: Res::new(),
+            state: State::new()
+        }
+    }
+
     pub fn req(&self) -> &Req {
         return &self.req;
     }
@@ -174,25 +211,7 @@ pub async fn listen(port: u16) {
 }
 
 fn handle_response(request: Request<Body>, middleware: Arc<Middleware>) -> Result<Response<Body>, GenericError> {
-    println!("HERE INTO");
-    let mut ctx = Ctx {
-        req: Req {
-            request,
-            args: Vec::new(),
-            host: "".to_string(),
-            path: "".to_string(),
-            query: "".to_string(),
-            hash: "".to_string(),
-        },
-        res: Res {
-            code: None,
-            headers: HashMap::new(),
-            body: "".to_string()
-        },
-        state: State {
-            values: HashMap::new()
-        }
-    };
+    let mut ctx = Ctx::new(request);
     ctx = middleware(ctx);
     Ok(Response::new(Body::from(ctx.res.body)))
 }
